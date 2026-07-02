@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Gợi ý sản phẩm</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0f1117; color: #e8eaf0; font-family: Arial, sans-serif; }
+    .header { background: #1a1d27; padding: 20px 40px; border-bottom: 1px solid #2a2d3a; }
+    .header h1 { font-size: 22px; color: #4f8ef7; }
+    .header p { color: #6b7280; font-size: 13px; margin-top: 4px; }
+    .nav { display: flex; gap: 12px; margin-top: 14px; }
+    .nav a { padding: 7px 18px; border-radius: 6px; text-decoration: none;
+             color: #6b7280; font-size: 13px; border: 1px solid #2a2d3a; }
+    .nav a.active, .nav a:hover { background: #4f8ef7; color: #fff; border-color: #4f8ef7; }
+    .container { padding: 30px 40px; max-width: 900px; }
+    .card { background: #1a1d27; border-radius: 10px; padding: 24px;
+            border: 1px solid #2a2d3a; margin-bottom: 20px; }
+    .card h3 { font-size: 15px; margin-bottom: 16px; }
+    .search-row { display: flex; gap: 10px; }
+    .search-row input { flex: 1; padding: 10px 14px; background: #0f1117;
+                        border: 1px solid #2a2d3a; border-radius: 6px;
+                        color: #e8eaf0; font-size: 14px; }
+    .search-row button { padding: 10px 22px; background: #4f8ef7; color: #fff;
+                         border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    .search-row button:hover { background: #3a7de8; }
+    .product-list { margin-top: 20px; }
+    .product-item { background: #0f1117; border-radius: 8px; padding: 16px;
+                    border: 1px solid #2a2d3a; margin-bottom: 10px;
+                    display: flex; justify-content: space-between; align-items: center; }
+    .product-item .name { font-size: 14px; }
+    .product-item .sold { font-size: 12px; color: #4ff7b0; margin-top: 4px; }
+    .badge { background: #4f8ef7; color: #fff; font-size: 11px;
+             padding: 3px 10px; border-radius: 20px; }
+    .empty { color: #6b7280; font-size: 13px; margin-top: 16px; display: none; }
+    .top-list { list-style: none; }
+    .top-list li { display: flex; justify-content: space-between;
+                   padding: 10px 0; border-bottom: 1px solid #2a2d3a; font-size: 13px; }
+    .top-list li:last-child { border-bottom: none; }
+    .top-list li span { color: #4ff7b0; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🛒 E-commerce Analytics Dashboard</h1>
+  <p>Hệ thống Phân tích Hành vi Mua sắm và Gợi ý Sản phẩm — Tiki Dataset</p>
+  <div class="nav">
+    <a href="/dashboard">Dashboard</a>
+    <a href="/recommend" class="active">Gợi ý sản phẩm</a>
+  </div>
+</div>
+
+<div class="container">
+
+  <div class="card">
+    <h3>🔍 Gợi ý sản phẩm theo khách hàng</h3>
+    <div class="search-row">
+      <input type="number" id="customer-input"
+             placeholder="Nhập mã khách hàng (Customer_ID)">
+      <button onclick="layGoiYKhachHang()">Xem gợi ý</button>
+    </div>
+    <p class="empty" id="empty-msg">Không tìm thấy gợi ý cho khách hàng này.</p>
+    <div class="product-list" id="rec-list"></div>
+  </div>
+
+  <div class="card">
+    <h3>🔥 Top sản phẩm bán chạy</h3>
+    <ul class="top-list" id="top-list"></ul>
+  </div>
+
+</div>
+
+<script>
+const API = "http://localhost:5000";
+
+fetch(`${API}/api/top-products`).then(r => r.json()).then(data => {
+  document.getElementById("top-list").innerHTML = data.map((p, i) => `
+    <li>
+      <span style="color:#6b7280">#${i+1}</span>
+      ${p.product_name}
+      <span>${p.so_luot_mua.toLocaleString("vi")} lượt mua</span>
+    </li>`).join("");
+});
+
+function layGoiYKhachHang() {
+  const id = document.getElementById("customer-input").value.trim();
+  if (!id) return;
+
+  const list = document.getElementById("rec-list");
+  const empty = document.getElementById("empty-msg");
+
+  fetch(`${API}/api/recommend-customer/${id}`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.error || !data.recommendations.length) {
+        list.innerHTML = "";
+        empty.style.display = "block";
+        return;
+      }
+      empty.style.display = "none";
+      list.innerHTML = `<p style="color:#6b7280;font-size:12px;margin-bottom:12px">
+        Top 5 gợi ý cho khách hàng #${id}:</p>` +
+        data.recommendations.map(p => `
+          <div class="product-item">
+            <div>
+              <div class="name">${p.Product_Name}</div>
+              <div class="sold">🏆 Xếp hạng: #${p.Rank}</div>
+            </div>
+            <span class="badge">ID: ${p.Product_ID}</span>
+          </div>`).join("");
+    })
+    .catch(() => {
+      empty.style.display = "block";
+    });
+}
+
+document.getElementById("customer-input").addEventListener("keypress", e => {
+  if (e.key === "Enter") layGoiYKhachHang();
+});
+</script>
+</body>
+</html>
