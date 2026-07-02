@@ -1,0 +1,110 @@
+
+============================================================
+CUSTOMER BEHAVIOR ANALYSIS
+Dataset: Tiki E-commerce Review Data
+============================================================
+
+1. CONG THUC RFM
+   RFM la phuong phap phan tich hanh vi khach hang dua tren 3 tieu chi:
+
+   Recency (R) - Gan day:
+      Tinh so ngay tu lan mua gan nhat cua khach den ngay tham chieu.
+      Khach hang co R thap = mua hang gan day = gia tri cao hon.
+      Cong thuc: R = ngay_tham_chieu - ngay_mua_gan_nhat (tinh bang so ngay)
+
+   Frequency (F) - Tan suat:
+      Tong so don hang ma khach hang da thuc hien trong toan bo du lieu.
+      F cao = khach mua nhieu lan = trung thanh hon.
+      Cong thuc: F = COUNT(don_hang) theo customer_id
+
+   Monetary (M) - Gia tri:
+      Tong gia tri chi tieu cua khach hang.
+      Luu y: du lieu nay la du lieu review, khong co cot gia san pham.
+      Thay the bang: M = F x diem_rating_trung_binh
+      (the hien ca muc do tieu thu lan su hai long)
+
+   Moi chieu duoc cham diem tu 1-4 bang phuong phap quantile:
+      - Diem 4: nhom 25% tot nhat
+      - Diem 1: nhom 25% thap nhat
+   Tong diem RFM = R + F + M (tu 3 den 12)
+
+2. KET QUA PHAN KHUC
+   Tong so khach hang phan tich: 199,706
+   Tong so don hang hop le     : 263,257
+
+   Quy tac phan khuc:
+      VIP             : R >= 3, F >= 3, M >= 3  (khach giao dich nhieu, gan day, gia tri cao)
+      Khach trung thanh: R >= 3, F >= 2          (mua gan day, tuong doi thuong xuyen)
+      Khach moi       : R >= 3, F == 1           (moi mua lan dau, can cham soc them)
+      Co nguy co roi bo: R == 2, F >= 2          (tung mua nhieu nhung dang giam tan suat)
+      Can kich hoat lai: R <= 1, F >= 2          (lau roi khong mua du truoc do thuong xuyen)
+      Khach tieu thu thap: con lai               (mua it, lau roi khong quay lai)
+
+   Chi tiet tung nhom:
+
+      VIP (40.6%):
+         So khach  : 81,963
+         Recency TB: 1250 ngay
+         Frequency : 1.54 don/nguoi
+         Monetary  : 7.42 diem gia tri
+         Diem RFM  : 11.5/12
+
+      Co nguy co roi bo (24.9%):
+         So khach  : 50,308
+         Recency TB: 1719 ngay
+         Frequency : 1.21 don/nguoi
+         Monetary  : 5.43 diem gia tri
+         Diem RFM  : 9.3/12
+
+      Khach trung thanh (8.9%):
+         So khach  : 17,855
+         Recency TB: 1232 ngay
+         Frequency : 1.02 don/nguoi
+         Monetary  : 2.84 diem gia tri
+         Diem RFM  : 8.5/12
+
+      Can kich hoat lai (25.6%):
+         So khach  : 51,585
+         Recency TB: 2340 ngay
+         Frequency : 1.13 don/nguoi
+         Monetary  : 4.97 diem gia tri
+         Diem RFM  : 8.1/12
+
+3. XU HUONG MUA SAM
+
+   Theo thang:
+      Thang co nhieu don nhat: 2021-12 (9,975 don)
+      Xu huong chung: tang dan qua cac nam, co dinh cao vao mua le/tet
+
+   Theo ngay trong tuan:
+      T4: 40,652 don
+      T2: 40,201 don
+      T5: 38,567 don
+
+   Top nguoi ban:
+      Tiki Trading: 144,383 don (chiem thi phan lon nhat)
+
+4. INSIGHT RUT RA
+
+   a) Nhom VIP chi chiem khoang 40.6% khach hang nhung la nhom co gia tri
+      cao nhat. Can co chuong trinh uu dai rieng (loyalty program, giam gia som,
+      ho tro uu tien) de giu chan nhom nay.
+
+   b) Nhom "Co nguy co roi bo" la nhom can can thiep ngay. Truoc day ho mua
+      tuong doi thuong xuyen nhung dang mat dan. Nen gui email/notification
+      nhac nho hoac khuyen mai dac biet de keo ho quay lai.
+
+   c) Nhom "Khach moi" chiem ty le 0.0%. Day la co hoi lon - neu onboarding
+      tot (email chao mung, ma giam gia lan 2...) co the chuyen nhom nay
+      thanh "Khach trung thanh" hoac "VIP".
+
+   d) Don hang tap trung vao ngay thuong (Thu 2 - Thu 5), cao hon cuoi tuan.
+      Dieu nay nguoc voi xu huong chung cua e-commerce. Nguyen nhan co the
+      do Tiki phu phuc vu nhom khach hang di lam, mua hang vao gio nghi trua
+      hoac sau gio lam.
+
+   e) Tiki Trading chiem phan lon don hang, cho thay thi truong tap trung cao.
+      Cac seller thu ba (third-party) can dau tu them vao chat luong phuc vu
+      va toc do giao hang de canh tranh.
+
+============================================================
