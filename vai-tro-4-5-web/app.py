@@ -56,12 +56,26 @@ def recommend_customer(customer_id):
     df = doc_csv("top5_recommendations.csv")
     cleaned = doc_csv("cleaned_df.csv")[["product_id","product_name"]].drop_duplicates()
     ket_qua = df[df["Customer_ID"] == customer_id]
-    if ket_qua.empty:
-        return jsonify({"error": "Không tìm thấy khách hàng"}), 404
-    ket_qua = ket_qua.merge(cleaned, left_on="Product_ID", right_on="product_id", how="left")
-    ket_qua["Product_Name"] = ket_qua["product_name"].fillna(ket_qua["Product_Name"])
-    result = ket_qua[["Rank","Product_ID","Product_Name"]].to_dict(orient="records")
-    return jsonify({"customer_id": customer_id, "recommendations": result})
+    
+    if not ket_qua.empty:
+        ket_qua = ket_qua.merge(cleaned, left_on="Product_ID", right_on="product_id", how="left")
+        ket_qua["Product_Name"] = ket_qua["product_name"].fillna(ket_qua["Product_Name"])
+        result = ket_qua[["Rank","Product_ID","Product_Name"]].to_dict(orient="records")
+        return jsonify({
+            "customer_id": customer_id,
+            "type": "fp_growth",
+            "recommendations": result
+        })
+    
+    top = doc_csv("top_products.csv").head(5)
+    result = [{"Rank": i+1, "Product_ID": row["product_id"],
+               "Product_Name": row["product_name"]}
+              for i, row in top.iterrows()]
+    return jsonify({
+        "customer_id": customer_id,
+        "type": "popularity_fallback",
+        "recommendations": result
+    })
 @app.route("/api/thong-ke")
 def thong_ke():
     rfm = doc_csv("tong_hop_phan_khuc.csv")

@@ -99,8 +99,11 @@ function layGoiYKhachHang() {
         return;
       }
       empty.style.display = "none";
-      list.innerHTML = `<p style="color:#6b7280;font-size:12px;margin-bottom:12px">
-        Top 5 gợi ý cho khách hàng #${id}:</p>` +
+const typeLabel = data.type === "fp_growth" 
+  ? "🤖 Gợi ý từ FP-Growth" 
+  : "🔥 Popularity Fallback — sản phẩm bán chạy nhất";
+list.innerHTML = `<p style="color:#6b7280;font-size:12px;margin-bottom:12px">
+  ${typeLabel} cho khách hàng #${id}:</p>` +
         data.recommendations.map(p => `
           <div class="product-item">
             <div>
