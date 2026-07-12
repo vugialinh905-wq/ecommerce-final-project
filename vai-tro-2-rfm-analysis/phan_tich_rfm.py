@@ -1,11 +1,15 @@
 import os
-os.environ["HADOOP_HOME"] = r"C:\hadoop"
-os.environ["PYSPARK_PYTHON"] = "python"   # dung "python" cho Windows
-os.environ["PYSPARK_DRIVER_PYTHON"] = "python"  # them dong nay tranh loi driver
+os.environ["HADOOP_HOME"] = r"C:\rfm\hadoop-3.3.6"
+os.environ["PATH"] = os.environ["HADOOP_HOME"] + r"\bin;" + os.environ["PATH"]
+os.environ["PYSPARK_PYTHON"] = "python"
 
 import warnings
 warnings.filterwarnings("ignore")
 
+import argparse
+import glob
+import subprocess
+import sys
 import pandas as pd
 import numpy as np
 import matplotlib
@@ -18,19 +22,50 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import TimestampType, DoubleType
 
 # ============================================================
-# CAU HINH DUONG DAN - chi can sua 2 dong nay
+# CAU HINH DUONG DAN HDFS - chi can sua o day
 # ============================================================
-DATA_PATH  = r"C:\phan 2 vai tro 2\phan_1\data\merged_df.csv"
-OUTPUT_DIR = "output_rfm/"        # thu muc luu ket qua
+# Namenode cua Hadoop cai tren may (mac dinh chay local, port 9000)
+HDFS_NAMENODE = "hdfs://localhost:9000"
+
+# Du lieu dau vao: doc tu output "merged" ma Spark job process_tiki_spark.py
+# da ghi len HDFS (xem spark_jobs/process_tiki_spark.py va README phan 1).
+#   - Chay ban chinh thuc      -> /ecommerce/output/merged
+#   - Chay demo bang temp_data -> /ecommerce/output_temp/merged
+INPUT_HDFS_PATH = HDFS_NAMENODE + "/ecommerce/output/merged"
+
+# Ket qua RFM se duoc day len thu muc nay tren HDFS
+OUTPUT_HDFS_DIR = "/ecommerce/output_rfm"
+
+# Pandas.to_csv() va matplotlib khong ghi truc tiep len HDFS duoc, nen script
+# se ghi tam ra thu muc local nay truoc, sau do dung lenh "hdfs dfs -put" de
+# day toan bo len HDFS (giong cach lam cua scripts/upload_to_hdfs.bat trong
+# phan 1 cua project).
+LOCAL_TEMP_DIR = "output_rfm_temp/"
 # ============================================================
+
+# Cho phep doi input/output tu dong lenh de khong phai sua code moi lan chay
+# demo (temp_data) hay chay chinh thuc (data). Neu khong truyen gi thi dung
+# dung mac dinh o tren.
+parser = argparse.ArgumentParser(description="Phan tich RFM khach hang Tiki (doc/ghi HDFS)")
+parser.add_argument("--input", default=INPUT_HDFS_PATH,
+                     help="Duong dan HDFS toi thu muc merged (mac dinh: %(default)s)")
+parser.add_argument("--output-hdfs", default=OUTPUT_HDFS_DIR,
+                     help="Thu muc HDFS de luu ket qua RFM (mac dinh: %(default)s)")
+parser.add_argument("--local-temp", default=LOCAL_TEMP_DIR,
+                     help="Thu muc local tam de ghi file truoc khi day len HDFS")
+args, _ = parser.parse_known_args()
+
+INPUT_HDFS_PATH = args.input
+OUTPUT_HDFS_DIR = args.output_hdfs
+OUTPUT_DIR = args.local_temp if args.local_temp.endswith(("/", "\\")) else args.local_temp + "/"
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 # ============================================================
-# BUOC 1: KHOI DONG SPARK VA DOC DU LIEU
+# BUOC 1: KHOI DONG SPARK VA DOC DU LIEU TU HDFS
 # ============================================================
-print("Buoc 1: Khoi dong Spark va doc du lieu...")
+print("Buoc 1: Khoi dong Spark va doc du lieu tu HDFS...")
 
 spark = (SparkSession.builder
          .appName("PhanTichRFM")
@@ -39,21 +74,85 @@ spark = (SparkSession.builder
          .getOrCreate())
 spark.sparkContext.setLogLevel("ERROR")
 
-# Doc bang pandas truoc de xu ly cot flag (True/False kieu bool)
-raw_pd = pd.read_csv(DATA_PATH)
+print(f"  Dang doc du lieu tu HDFS: {INPUT_HDFS_PATH}")
+
+# Doc du lieu merged truc tiep tu HDFS bang Spark (thay vi pandas.read_csv
+# tu file local nhu truoc). Output cua process_tiki_spark.py duoc ghi bang
+# coalesce(1) + quoteAll nen day la 1 thu muc chua part-*.csv, Spark doc
+# thang duoc ca thu muc nay.
+raw_spark_df = (
+    spark.read
+    .option("header", True)
+    .option("inferSchema", True)
+    .option("multiLine", True)
+    .option("quote", '"')
+    .option("escape", '"')
+    .csv(INPUT_HDFS_PATH)
+)
+
+# Chuyen sang pandas de xu ly cot flag (True/False kieu bool) giong code cu,
+# khong doi logic xu ly ben duoi.
+raw_pd = raw_spark_df.toPandas()
 
 # Chi lay cac ban ghi khong bi gian lan (F3, F4, F5 deu False)
-sach_pd = raw_pd[
-    (~raw_pd["F3_flag"].astype(bool)) &
-    (~raw_pd["F4_Flag"].astype(bool)) &
-    (~raw_pd["F5_flag"].astype(bool))
-].copy()
+# Luu y: tuy ban Spark job xu ly du lieu (vai tro khac trong nhom) co the
+# chua tinh du ca 3 cot flag (vi du F4_Flag - phat hien trung lap bang do
+# tuong dong noi dung). Code duoi day chi loc theo cot nao THUC SU CO trong
+# du lieu, cot nao thieu thi bo qua, tranh loi KeyError.
+cac_cot_flag_can_loc = ["F3_flag", "F4_Flag", "F5_flag"]
+cac_cot_flag_co_san = [c for c in cac_cot_flag_can_loc if c in raw_pd.columns]
+cac_cot_flag_bi_thieu = [c for c in cac_cot_flag_can_loc if c not in raw_pd.columns]
+
+if cac_cot_flag_bi_thieu:
+    print(f"  CANH BAO: thieu cot {cac_cot_flag_bi_thieu} trong du lieu dau vao,"
+          f" bo qua cac cot nay khi loc gian lan.")
+if cac_cot_flag_co_san:
+    dieu_kien_sach = pd.Series(True, index=raw_pd.index)
+    for cot in cac_cot_flag_co_san:
+        # fillna(False): coi thieu du lieu la KHONG gian lan, tranh loai nham
+        flag_col = raw_pd[cot].fillna(False).astype(bool)
+        dieu_kien_sach &= (~flag_col)
+    sach_pd = raw_pd[dieu_kien_sach].copy()
+    print(f"  So ban ghi con lai sau loc: {len(sach_pd):,}")
+else:
+    print("  CANH BAO: khong co cot flag nao de loc, dung toan bo du lieu.")
+    sach_pd = raw_pd.copy()
+
+if sach_pd.empty:
+    print("LOI: DataFrame rong sau khi loc, dung chuong trinh de kiem tra lai dieu kien loc.")
+    sys.exit(1)
 
 # Chuyen sang dang ngay thang
-sach_pd["purchased_at"] = pd.to_datetime(sach_pd["purchased_at"], errors="coerce")
-sach_pd["created_at"]   = pd.to_datetime(sach_pd["created_at"],   errors="coerce")
+print("Kieu du lieu goc cua purchased_at:", sach_pd["purchased_at"].dtype)
+print("5 gia tri mau purchased_at truoc convert:")
+print(sach_pd["purchased_at"].head(5).tolist())
+print("So gia tri null truoc convert:", sach_pd["purchased_at"].isna().sum())
+
+sach_pd["purchased_at"] = pd.to_datetime(sach_pd["purchased_at"], errors="coerce", utc=True, unit="s")
+sach_pd["created_at"]   = pd.to_datetime(sach_pd["created_at"],   errors="coerce", utc=True, unit="s")
+
+# Bo thong tin mui gio (chuyen ve dang "naive"). Neu giu mui gio, PySpark
+# tren Windows se dung ham mktime cua he thong de chuyen doi, ham nay hay
+# bi loi OverflowError voi mot so gia tri ngay thang trong du lieu.
+sach_pd["purchased_at"] = sach_pd["purchased_at"].dt.tz_convert(None)
+sach_pd["created_at"]   = sach_pd["created_at"].dt.tz_convert(None)
+
 sach_pd["rating"]       = pd.to_numeric(sach_pd["rating"],         errors="coerce")
 sach_pd = sach_pd.dropna(subset=["customer_id", "purchased_at"])
+
+# Loai bo cac ban ghi co ngay thang bat thuong (loi nhap lieu, vd nam 1900
+# hay nam 9999) de tranh OverflowError khi PySpark chuyen doi datetime
+# tren Windows.
+gioi_han_duoi = pd.Timestamp("2000-01-01")
+gioi_han_tren = pd.Timestamp("2035-12-31")
+so_dong_truoc_loc = len(sach_pd)
+sach_pd = sach_pd[
+    sach_pd["purchased_at"].between(gioi_han_duoi, gioi_han_tren) &
+    (sach_pd["created_at"].isna() | sach_pd["created_at"].between(gioi_han_duoi, gioi_han_tren))
+].copy()
+so_dong_bi_loai = so_dong_truoc_loc - len(sach_pd)
+if so_dong_bi_loai > 0:
+    print(f"  Da loai {so_dong_bi_loai:,} ban ghi co ngay thang bat thuong (ngoai khoang 2000-2035)")
 
 print(f"  Tong so ban ghi sau loc spam: {len(sach_pd):,}")
 print(f"  Khoang thoi gian: {sach_pd['purchased_at'].min().date()} den {sach_pd['purchased_at'].max().date()}")
@@ -539,4 +638,38 @@ with open(OUTPUT_DIR + "bao_cao_rfm.txt", "w", encoding="utf-8") as f:
 print("  Da luu bao cao: bao_cao_rfm.txt")
 
 spark.stop()
-print("\nHoan thanh! Tat ca ket qua da luu vao thu muc:", OUTPUT_DIR)
+
+
+# ============================================================
+# BUOC 8: DAY TOAN BO KET QUA LEN HDFS
+# ============================================================
+print("\nBuoc 8: Day ket qua len HDFS...")
+
+
+def day_len_hdfs(thu_muc_local, thu_muc_hdfs):
+    danh_sach_file = glob.glob(os.path.join(os.path.abspath(thu_muc_local), "*"))
+
+    if not danh_sach_file:
+        print(f"  Khong co file nao trong {thu_muc_local} de day len HDFS")
+        return
+
+    subprocess.run(["hdfs.cmd", "dfs", "-mkdir", "-p", thu_muc_hdfs], check=True)
+
+    for duong_dan_file in danh_sach_file:
+        # -f de ghi de neu file da ton tai tren HDFS (chay lai nhieu lan)
+        subprocess.run(
+            ["hdfs.cmd", "dfs", "-put", "-f", duong_dan_file, thu_muc_hdfs + "/"],
+            check=True
+        )
+        print(f"    Da day len HDFS: {thu_muc_hdfs}/{os.path.basename(duong_dan_file)}")
+
+try:
+    day_len_hdfs(OUTPUT_DIR, OUTPUT_HDFS_DIR)
+    print(f"\nHoan thanh! Ket qua RFM da co tren HDFS tai: {OUTPUT_HDFS_DIR}")
+    print(f"Kiem tra bang lenh: hdfs dfs -ls {OUTPUT_HDFS_DIR}")
+except subprocess.CalledProcessError as loi:
+    print("\n  LOI: khong day duoc len HDFS. Kiem tra lai:")
+    print("    - HDFS (NameNode/DataNode) da chay chua (lenh: jps)")
+    print("    - Lenh 'hdfs' co dang trong PATH khong")
+    print("  Ket qua van con day du o thu muc local:", OUTPUT_DIR)
+    raise loi
