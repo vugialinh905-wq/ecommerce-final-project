@@ -515,49 +515,79 @@ def train_fp_growth(transactions: List[frozenset],
     return fp_growth, frequent_itemsets, rules
 
 
-# Ví dụ sử dụng
+# =====================================================================
+# PIPELINE CHÍNH: đọc input từ HDFS (output vai trò 1) -> train FP-Growth
+# -> tạo gợi ý -> lưu local -> xuất output lên HDFS (Chỗ 1 + Chỗ 2)
+# =====================================================================
 if __name__ == "__main__":
-    # Dữ liệu mẫu
-    sample_transactions = [
-        frozenset(['milk', 'bread', 'eggs']),
-        frozenset(['milk', 'bread']),
-        frozenset(['milk', 'eggs']),
-        frozenset(['bread', 'eggs']),
-        frozenset(['milk', 'bread', 'butter']),
-        frozenset(['milk', 'butter']),
-        frozenset(['bread', 'butter']),
-        frozenset(['milk', 'bread', 'eggs', 'butter']),
-        frozenset(['milk', 'eggs', 'butter']),
-        frozenset(['bread', 'eggs', 'butter'])
-    ]
-    
-    # Train model
-    model, frequent_itemsets, rules = train_fp_growth(
-        sample_transactions,
-        min_support=0.2,
+    import os
+    import subprocess
+
+    from src.utils import (
+        read_csv,
+        create_customer_baskets,
+        create_transactions_list,
+        get_product_name_map,
+        format_rules_output,
+    )
+    # Đổi tên khi import để tránh trùng với class RecommendationEngine
+    # định nghĩa ở trên trong chính file này (2 class khác nhau, cùng tên).
+    from src.recommendation import RecommendationEngine as BatchRecommendationEngine
+
+    # =========================
+    # Chỗ 1 - Đọc input
+    # Thay vì: df = pd.read_csv("data/cleaned_df.csv")
+    # Đổi thành - dùng hàm utils đã viết sẵn, đọc từ HDFS output của vai trò 1
+    # =========================
+    df = read_csv("/ecommerce/output/merged")
+
+    # Tạo giỏ hàng khách hàng (basket) và transactions cho FP-Growth
+    baskets = create_customer_baskets(df, rating_threshold=4)
+    transactions = create_transactions_list(baskets)
+    product_map = get_product_name_map(df)
+
+    # Train FP-Growth
+    fp_growth, frequent_itemsets, rules = train_fp_growth(
+        transactions,
+        min_support=0.05,
         min_confidence=0.5,
         min_lift=1.0
     )
-    
-    # Tạo recommendation engine
-    recommender = RecommendationEngine(model)
-    
-    # Test recommendations
-    user_items = ['milk', 'bread']
-    recommendations = recommender.recommend_for_items(user_items, top_n=5)
-    
-    print(f"\nRecommendations for {user_items}:")
-    for rec in recommendations:
-        print(f"  {rec['item']}: confidence={rec['confidence']:.3f}, lift={rec['lift']:.3f}")
-    
-    # Tính metrics
+
+    # Tạo gợi ý Top 5 cho toàn bộ khách hàng
+    batch_engine = BatchRecommendationEngine(rules, baskets, product_map)
+    batch_engine.generate_recommendations(max_recommendations=5)
+
+    # Lưu output ra local trước (giữ nguyên hành vi cũ)
+    os.makedirs("output", exist_ok=True)
+    batch_engine.export_recommendations("output/top5_recommendations.csv")
+
+    rules_df = format_rules_output(rules)
+    rules_df.to_csv("output/association_rules.csv", index=False)
+    print("✓ Đã lưu output local: output/top5_recommendations.csv, output/association_rules.csv")
+
+    # In metrics tổng quan
     metrics = MetricsCalculator.calculate_rule_quality_metrics(rules)
-    print(f"\nMetrics Summary:")
-    for key, value in metrics.items():
-        print(f"  {key}: {value}")
-    
-    # Lưu model
-    model.save_model("models/fp_growth_model.pkl")
-    
+    MetricsCalculator.print_metrics_summary(rules, frequent_itemsets)
+
+    # =========================
+    # Chỗ 2 - Xuất output lên HDFS
+    # =========================
+    subprocess.run(["hdfs", "dfs", "-mkdir", "-p", "/ecommerce/output_rfm"], check=True)
+
+    subprocess.run([
+        "hdfs", "dfs", "-put", "-f",
+        "output/top5_recommendations.csv",
+        "/ecommerce/output_rfm/top5_recommendations.csv"
+    ], check=True)
+
+    subprocess.run([
+        "hdfs", "dfs", "-put", "-f",
+        "output/association_rules.csv",
+        "/ecommerce/output_rfm/association_rules.csv"
+    ], check=True)
+
+    print("Đã xuất output lên HDFS!")
+
     # Đóng Spark
-    model.stop_spark()
+    fp_growth.stop_spark()

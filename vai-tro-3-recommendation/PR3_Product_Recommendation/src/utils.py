@@ -1,9 +1,68 @@
 """
 Utility functions for Product Recommendation System
 """
+import subprocess
+from io import StringIO
+
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple
+
+
+def _is_hdfs_path(path: str) -> bool:
+    """
+    Kiểm tra xem path có phải là đường dẫn HDFS hay không
+
+    Args:
+        path: Đường dẫn cần kiểm tra
+
+    Returns:
+        True nếu là đường dẫn HDFS (bắt đầu bằng /ecommerce hoặc hdfs://)
+    """
+    return path.startswith("/ecommerce") or path.startswith("hdfs://")
+
+
+def _read_csv_from_hdfs(hdfs_dir: str) -> pd.DataFrame:
+    """
+    Đọc CSV từ một thư mục HDFS do Spark ghi ra (nhiều file part-*.csv)
+
+    Args:
+        hdfs_dir: Đường dẫn thư mục trên HDFS, ví dụ "/ecommerce/output/merged"
+
+    Returns:
+        DataFrame gộp từ toàn bộ các file part-*.csv trong thư mục
+    """
+    cmd = f"hdfs dfs -cat {hdfs_dir}/part-*.csv"
+    result = subprocess.check_output(cmd, shell=True)
+    text = result.decode("utf-8")
+
+    return pd.read_csv(
+        StringIO(text),
+        engine="python",
+        quotechar='"',
+        escapechar='\\',
+        on_bad_lines="skip"
+    )
+
+
+def read_csv(path: str) -> pd.DataFrame:
+    """
+    Đọc CSV từ local hoặc từ HDFS, tự động phát hiện dựa trên path
+
+    Args:
+        path: Đường dẫn file/thư mục. Nếu bắt đầu bằng "/ecommerce" hoặc
+              "hdfs://" thì sẽ đọc từ HDFS, ngược lại đọc file local như bình thường
+
+    Returns:
+        DataFrame chứa dữ liệu đã đọc
+    """
+    if _is_hdfs_path(path):
+        df = _read_csv_from_hdfs(path)
+    else:
+        df = pd.read_csv(path)
+
+    print(f"✓ Loaded data: {df.shape[0]} rows, {df.shape[1]} columns (source: {path})")
+    return df
 
 
 def load_data(filepath: str) -> pd.DataFrame:
